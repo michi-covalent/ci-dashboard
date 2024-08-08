@@ -30,10 +30,11 @@ func getWorkflows(ctx context.Context, client *github.Client, owner, repo string
 	return filepaths, nil
 }
 
-func getWorkflowRuns(ctx context.Context, client *github.Client, owner, repo, branch, workflow, event string, count int) ([]*github.WorkflowRun, error) {
+func getWorkflowRuns(ctx context.Context, client *github.Client, owner, repo, branch, workflow, event string, count int, created string) ([]*github.WorkflowRun, error) {
 	listOptions := github.ListWorkflowRunsOptions{
 		Branch:      branch,
 		Event:       event,
+		Created:     created,
 		ListOptions: github.ListOptions{},
 	}
 	var workflowRuns []*github.WorkflowRun

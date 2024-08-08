@@ -62,6 +62,19 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		summary, err := cmd.Flags().GetBool("summary")
+		if err != nil {
+			return err
+		}
+		top, err := cmd.Flags().GetInt("top")
+		if err != nil {
+			return err
+		}
+		days, err := cmd.Flags().GetInt("days")
+		if err != nil {
+			return err
+		}
+		created := daysToTimeRange(days)
 		var workflows []string
 		details := false
 		if workflowFlag != "" {
@@ -75,23 +88,21 @@ var showCmd = &cobra.Command{
 			workflows = append(workflows, wf...)
 		}
 		tasks := make(chan string)
+		result := map[string][]*github.WorkflowRun{}
 		wg := sync.WaitGroup{}
 		mux := sync.Mutex{}
 		for i := 0; i < numWorkers; i++ {
 			wg.Add(1)
 			go func() {
 				for workflow := range tasks {
-					runs, err := getWorkflowRuns(ctx, client, owner, repo, branch, workflow, event, numRuns)
+					runs, err := getWorkflowRuns(ctx, client, owner, repo, branch, workflow, event, numRuns, created)
 					if err != nil {
 						slog.Error("Failed to get workflow runs", slog.Any("error", err))
 						continue
 					}
 					mux.Lock()
-					printDashboard(owner, repo, branch, workflow, event, runs)
+					result[workflow] = runs
 					mux.Unlock()
-					if details {
-						printDetailedDashboard(ctx, client, owner, repo, runs)
-					}
 				}
 				wg.Done()
 			}()
@@ -102,8 +113,104 @@ var showCmd = &cobra.Command{
 		}
 		close(tasks)
 		wg.Wait()
+		if summary {
+			printSummary(owner, repo, branch, event, result, top)
+
+		} else {
+			for workflow, runs := range result {
+				printDashboard(owner, repo, branch, workflow, event, runs)
+				if details {
+					printDetailedDashboard(ctx, client, owner, repo, runs)
+				}
+			}
+		}
 		return nil
 	},
+}
+
+func daysToTimeRange(days int) string {
+	now := time.Now()
+	d := time.Duration(days) * 24 * time.Hour
+	from := now.Add(-d)
+	return fmt.Sprintf(">=%s", from.Format(time.RFC3339))
+}
+
+type workflowStats struct {
+	workflow        string
+	from            string
+	to              string
+	averageDuration time.Duration
+	successRate     float32
+	success         int
+	count           int
+}
+
+func printSummary(owner, repo, branch, event string, result map[string][]*github.WorkflowRun, top int) {
+	var statsList []workflowStats
+	for workflow, runs := range result {
+		if len(runs) == 0 {
+			continue
+		}
+		count := len(runs)
+		from := runs[count-1].GetRunStartedAt().Format(time.DateOnly)
+		to := runs[0].GetRunStartedAt().Format(time.DateOnly)
+		success := 0
+		var totalSeconds float64
+		for i := 0; i < count; i++ {
+			if runs[i].GetConclusion() == "success" {
+				success++
+				totalSeconds += runs[i].GetUpdatedAt().Time.Sub(runs[i].GetRunStartedAt().Time).Seconds()
+			}
+		}
+		stats := workflowStats{
+			workflow:        workflow,
+			from:            from,
+			to:              to,
+			averageDuration: time.Second * time.Duration(totalSeconds/float64(success)),
+			successRate:     100 * float32(success) / float32(count),
+			success:         success,
+			count:           count,
+		}
+		statsList = append(statsList, stats)
+	}
+	slices.SortFunc(statsList, func(a, b workflowStats) int {
+		return int(a.successRate - b.successRate)
+	})
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
+	fmt.Fprintln(w, "from\tto\tsuccess rate\tworkflow")
+	for i, stats := range statsList {
+		if i >= top {
+			break
+		}
+		link := color.New(color.FgCyan, color.Bold).SprintFunc()
+		workflowURL := fmt.Sprintf("https://github.com/%s/%s/actions/workflows/%s?query=branch%%3A%s+event%%3A%s++",
+			owner, repo, stats.workflow, branch, event)
+		status := fmt.Sprintf("%0.f%%", stats.successRate)
+		fmt.Fprintln(w, fmt.Sprintf("%s\t%s\t%s %d/%d\t%s",
+			stats.from, stats.to, status, stats.success, stats.count, link(getLink(workflowURL, stats.workflow)),
+		))
+	}
+	w.Flush()
+	slices.SortFunc(statsList, func(a, b workflowStats) int {
+		return int(b.averageDuration - a.averageDuration)
+	})
+	fmt.Fprintln(w, "from\tto\taverage duration\tworkflow")
+	for i, stats := range statsList {
+		if i >= top {
+			break
+		}
+		link := color.New(color.FgCyan, color.Bold).SprintFunc()
+		workflowURL := fmt.Sprintf("https://github.com/%s/%s/actions/workflows/%s?query=branch%%3A%s+event%%3A%s++",
+			owner, repo, stats.workflow, branch, event)
+		fmt.Fprintln(w, fmt.Sprintf("%s\t%s\t%s %d/%d\t%s",
+			stats.from, stats.to, stats.averageDuration, stats.success, stats.count, link(getLink(workflowURL, stats.workflow)),
+		))
+	}
+	w.Flush()
+}
+
+func getLink(url, text string) string {
+	return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
 }
 
 func printDashboard(owner, repo, branch, workflow, event string, runs []*github.WorkflowRun) {
@@ -353,4 +460,7 @@ func init() {
 	showCmd.Flags().BoolP("debug", "d", false, "Print debug logs")
 	showCmd.Flags().IntP("number", "n", 64, "The number of workflow runs to process")
 	showCmd.Flags().StringP("workflow", "w", "", "Workflow name (e.g. aks-byocni.yaml)")
+	showCmd.Flags().BoolP("summary", "s", false, "Print summary")
+	showCmd.Flags().IntP("top", "t", 10, "Print top n. Use with --summary flag")
+	showCmd.Flags().Int("days", 30, "Limit workflow runs by the number of days")
 }
