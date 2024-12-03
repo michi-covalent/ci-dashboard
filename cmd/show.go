@@ -324,24 +324,30 @@ func printDetailedDashboard(ctx context.Context, client *github.Client, owner, r
 	cancelledSteps := sortMapByValue(cancelledStepCount)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
 	red := color.New(color.FgRed, color.Bold)
-	red.Println("\nfailed jobs")
-	fmt.Fprintln(w, "job name\tfailure count")
-	for _, count := range failedJobs {
-		fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
+	if len(failedJobs) > 0 {
+		red.Println("\nfailed jobs")
+		fmt.Fprintln(w, "job name\tfailure count")
+		for _, count := range failedJobs {
+			fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
+		}
+		w.Flush()
 	}
-	w.Flush()
-	red.Println("\nfailed steps")
-	fmt.Fprintln(w, "step name\tfailure count")
-	for _, count := range failedSteps {
-		fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
+	if len(failedSteps) > 0 {
+		red.Println("\nfailed steps")
+		fmt.Fprintln(w, "step name\tfailure count")
+		for _, count := range failedSteps {
+			fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
+		}
+		w.Flush()
 	}
-	w.Flush()
-	red.Println("\ncancelled steps")
-	fmt.Fprintln(w, "step name\tfailure count")
-	for _, count := range cancelledSteps {
-		fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
+	if len(cancelledSteps) > 0 {
+		red.Println("\ncancelled steps")
+		fmt.Fprintln(w, "step name\tfailure count")
+		for _, count := range cancelledSteps {
+			fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
+		}
+		w.Flush()
 	}
-	w.Flush()
 	analyzeLogs(logsURLs)
 }
 
@@ -421,32 +427,36 @@ func analyzeLogs(logsURLs []*url.URL) {
 	failedTests := sortMapByValue(failedTestCount)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
 	red := color.New(color.FgRed, color.Bold)
-	red.Println("\nfailed tests")
-	fmt.Fprintln(w, "test name\tfailure count")
-	for _, count := range failedTests {
-		fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
+	if len(failedTests) > 0 {
+		red.Println("\nfailed tests")
+		fmt.Fprintln(w, "test name\tfailure count")
+		for _, count := range failedTests {
+			fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
+		}
+		w.Flush()
 	}
-	w.Flush()
-	errorLogCount := make(map[string]int)
-	for _, errorMessage := range errors {
-		r := regexp.MustCompile(`msg="([^"]+)"`)
-		matches := r.FindStringSubmatch(errorMessage)
-		if len(matches) == 2 {
-			count, ok := errorLogCount[matches[1]]
-			if ok {
-				errorLogCount[matches[1]] = count + 1
-			} else {
-				errorLogCount[matches[1]] = 1
+	if len(errors) > 0 {
+		errorLogCount := make(map[string]int)
+		for _, errorMessage := range errors {
+			r := regexp.MustCompile(`msg="([^"]+)"`)
+			matches := r.FindStringSubmatch(errorMessage)
+			if len(matches) == 2 {
+				count, ok := errorLogCount[matches[1]]
+				if ok {
+					errorLogCount[matches[1]] = count + 1
+				} else {
+					errorLogCount[matches[1]] = 1
+				}
 			}
 		}
+		errorLogs := sortMapByValue(errorLogCount)
+		red.Println("\nerror logs")
+		fmt.Fprintln(w, "error message\tcount")
+		for _, count := range errorLogs {
+			fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
+		}
+		w.Flush()
 	}
-	errorLogs := sortMapByValue(errorLogCount)
-	red.Println("\nerror logs")
-	fmt.Fprintln(w, "error message\tcount")
-	for _, count := range errorLogs {
-		fmt.Fprintln(w, fmt.Sprintf("%s\t%d", count.Name, count.Count))
-	}
-	w.Flush()
 	for _, errorLogsURL := range errorURLs {
 		slog.Debug("Jobs log URL with check-log-errors test failure", slog.String("logs-url", errorLogsURL))
 	}
