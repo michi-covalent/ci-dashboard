@@ -407,7 +407,7 @@ func analyzeLogs(logsURLs []*url.URL) {
 						}
 					}
 				}
-				r = regexp.MustCompile(` level=error.*`)
+				r = regexp.MustCompile(` level=(error|warn).*`)
 				matches = r.FindAllStringSubmatch(string(body), 10000)
 				for _, match := range matches {
 					for _, errorMessage := range match {
